@@ -1,111 +1,287 @@
 // Sophia Franke | 23030
-// Lab 4: Señales PWM Parte B
+// Lab 4: Señales PWM - Parte C
 // Fecha: 2025-08-15
+
+// Esta es la versión final y la comentada con la uni
 #include <Arduino.h>
 #include <stdint.h>
 #include <ESP32Servo.h>
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
 // Definición de pines
-#define Servo_Pin 26
-#define PB_Left 25
-#define PB_Right 33
+#define LED_RED 13
+#define LED_GREEN 12
+#define LED_BLUE 14
+#define SERVO_PIN 26
+#define PB_Color 18
+#define PB_Bright 19
+#define PB_LEFT 25
+#define PB_RIGHT 33
+
+#define delayTime 250
+
+#define PWM_Channel_Red 0
+#define PWM_Channel_Green 1
+#define PWM_Channel_Blue 2
+#define PWM_Channel_Servo 3
+
+#define PWM_Freq 100        // Frecuencia de PWM para LEDs. Esta se establece en 100 Hz ya que es adecuada para controlar el brillo de los LEDs sin parpadeo visible.
+#define PWM_Resolution 16   // Resolución de PWM para LEDs. Se utiliza una resolución de 16 bits para permitir un control preciso del brillo de los LEDs.
+#define SERVO_Freq 50     // Frecuencia de PWM para el servo. Se establece en 50 Hz, que es la frecuencia estándar para servos. 
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
 // Variables Globales
-Servo myServo;
+volatile int32_t brightnessred = 0;
+volatile int32_t brightnessblue = 0;
+volatile int32_t brightnessgreen = 0;
+volatile int32_t color = 0;
+volatile int32_t servoPosition = 1.5; // Posición inicial del servo en milisegundos (90 grados)
+volatile bool mode = false;
+
+volatile bool colorButtonPressed = false;
+volatile bool brightnessButtonPressed = false;
 volatile bool leftButtonPressed = false;
 volatile bool rightButtonPressed = false;
+volatile int32_t lastColorButtonPress = 0;
+volatile int32_t lastBrightnessButtonPress = 0;
 volatile int32_t lastLeftButtonPress = 0;
 volatile int32_t lastRightButtonPress = 0;
-volatile int32_t servoPosition = 2; // Posición inicial del servo en milisegundos (90 grados)
 
-// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
-// Tiempo de pulsos para el servo
-const int servoPositions[5] = {500, 1000, 1500, 2000, 2500}; // Posiciones del servo en microsegundos
+const int servoPositions[5] = {500, 1000, 1500, 2000, 2500}; // Posiciones del servo en microsegundos. Se establecen 5 posiciones predefinidas para el servo, representando diferentes ángulos de rotación.
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
 // Prototipos de funciones
+void setupLEDs(void);
 void setupServo(void);
-void setupButtons(void);
+void setupColor(void);
+void setupBrightness(void);
+void setupServoButtons(void);
+void IRAM_ATTR colorButtonISR(void);
+void IRAM_ATTR brightnessButtonISR(void);
 void IRAM_ATTR leftButtonISR(void);
 void IRAM_ATTR rightButtonISR(void);
-void updateServo(void);
+void updateLEDs(void);
+void updateServoPosition(void);
+void updateLEDsBasedOnServo(void);
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
 // Setup Principal
 void setup() {
   Serial.begin(115200);
+  setupLEDs();
   setupServo();
-  setupButtons();
-  myServo.writeMicroseconds(servoPositions[servoPosition]); // Inicializa el servo en la posición inicial
-  Serial.print("Posición inicial del servo: ");
-  Serial.println(servoPosition);
+  setupColor();
+  setupBrightness();
+  setupServoButtons();
+
+  ledcWrite(PWM_Channel_Red, 0);
+  ledcWrite(PWM_Channel_Green, 0);
+  ledcWrite(PWM_Channel_Blue, 0);
+  updateServoPosition();
 }
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
 // Loop Principal
-void loop() {
+void loop() { // El loop principal se encarga de manejar las pulsaciones de los botones y actualizar el estado del servo y los LEDs según las entradas del usuario. 
+  if (colorButtonPressed) {
+    colorButtonPressed = false;
+    color = (color + 1) % 4;
+
+  if (color == 0) { // Si se presiona el botón de color, se cambia al siguiente color. Si se llega al final de los colores, se vuelve al inicio. Este cambio de color se realiza en un ciclo: 0 (sin color), 1 (rojo), 2 (verde), 3 (azul). EL sin color se utiliza para apagar todos los LEDs y cambiar al "modo" servo, donde el control de color y brillo de los LEDs se desactiva.
+    mode = !mode;}
+
+  Serial.print(mode ? "Modo Servo - " : "Modo LED - "); // Indica si estamos en el modo servo o en el modo LED. Si se cambia al modo servo, se desactiva el control de color y brillo de los LEDs. Si se cambia al modo LED, se activa el control de color y brillo de los LEDs.
+  switch (color) {
+    case 0: 
+      Serial.println("Cambiando modo"); 
+      break;
+    case 1: 
+      Serial.println("Rojo seleccionado");
+      break;
+    case 2: 
+      Serial.println("Verde seleccionado"); 
+      break;
+    case 3: 
+      Serial.println("Azul seleccionado"); 
+      break;
+  }
+  delay(delayTime);
+  }
+
+  if (brightnessButtonPressed && !mode) { // Si el botón de brillo es presionado y no estamos en el "modo" servo, incrementa el brillo del color seleccionado.
+    brightnessButtonPressed = false;
+    switch (color) {
+      case 1:
+        brightnessred = (brightnessred + 1) % 5; // Cicla el brillo del rojo entre 0 y 4. Los valores de brillo son: 0 (apagado), 25%, 50%, 75%, 100%.
+        Serial.print("Brillo Rojo: "); 
+        Serial.println(brightnessred * 25);
+        break;
+      case 2:
+        brightnessgreen = (brightnessgreen + 1) % 5;
+        Serial.print("Brillo Verde: "); 
+        Serial.println(brightnessgreen * 25);
+        break;
+      case 3:
+        brightnessblue = (brightnessblue + 1) % 5;
+        Serial.print("Brillo Azul: "); 
+        Serial.println(brightnessblue * 25);
+        break;
+      }
+    updateLEDs();
+    delay(delayTime);
+    }
+
   if (leftButtonPressed) {
     leftButtonPressed = false;
     if (servoPosition > 0) {
       servoPosition--;
-      Serial.print("Posición del servo (Izq.): ");
+      Serial.print("Posición servo: "); 
       Serial.println(servoPosition);
-    } else {
-      Serial.println("El servo ya está en la posición mínima.");
     }
-    updateServo();
-    delay(250); // Para evitar rebotes
+    updateServoPosition();
+    if (mode){
+      updateLEDsBasedOnServo();
+      delay(delayTime);
+    }
+    }
+
+  if (rightButtonPressed) { // Si el botón derecho es presionado, incrementa la posición del servo. Si se encuentra en el "modo" servo, actualiza los LEDs basados en la posición del servo.
+    rightButtonPressed = false;
+    if (servoPosition < 4){
+      servoPosition++;
+      Serial.print("Posición servo: "); 
+      Serial.println(servoPosition);
+    }
+      updateServoPosition();
+      if (mode) {
+        updateLEDsBasedOnServo();
+         delay(delayTime);
+    }
+    }
+}
+
+  // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+  // Funciones de configuración
+
+  // Configura los LEDs. Utiliza canales PWM para controlar el brillo de cada color y establece la frecuencia y resolución adecuadas.
+  void setupLEDs(void) {
+  ledcSetup(PWM_Channel_Red, PWM_Freq, PWM_Resolution);
+  ledcAttachPin(LED_RED, PWM_Channel_Red);
+
+  ledcSetup(PWM_Channel_Green, PWM_Freq, PWM_Resolution);
+  ledcAttachPin(LED_GREEN, PWM_Channel_Green);
+
+  ledcSetup(PWM_Channel_Blue, PWM_Freq, PWM_Resolution);
+  ledcAttachPin(LED_BLUE, PWM_Channel_Blue);
   }
 
-  if (rightButtonPressed) {
-    rightButtonPressed = false;
-    if (servoPosition < 4) {
-      servoPosition++;
-      Serial.print("Posición del servo (Der.): ");
-      Serial.println(servoPosition);
-    } else {
-      Serial.println("El servo ya está en la posición máxima.");
-    }
-    updateServo();
-    delay(250); // Para evitar rebotes
-  }
+  // Configura el servo. Utiliza un canal PWM para controlar el servo y establece la frecuencia y resolución adecuadas.
+  void setupServo(void) {
+  ledcSetup(PWM_Channel_Servo, SERVO_Freq, 16);
+  ledcAttachPin(SERVO_PIN, PWM_Channel_Servo);
 }
+
+// Configura el botón de color. Utiliza una resistencia pull-up interna y una interrupción para detectar pulsaciones.
+void setupColor(void) {
+  pinMode(PB_Color, INPUT_PULLUP);
+  attachInterrupt(PB_Color, colorButtonISR, FALLING);
+  }
+
+// Configura el botón de brillo. Utiliza una resistencia pull-up interna y una interrupción para detectar pulsaciones.
+void setupBrightness(void) {
+  pinMode(PB_Bright, INPUT_PULLUP);
+  attachInterrupt(PB_Bright, brightnessButtonISR, FALLING);
+  }
+
+// Configura los botones izquierdo y derecho para controlar el servo. Utiliza interrupciones para detectar pulsaciones y evitar rebotes.
+void setupServoButtons(void) {
+  pinMode(PB_LEFT, INPUT_PULLUP);
+  pinMode(PB_RIGHT, INPUT_PULLUP);
+  attachInterrupt(PB_LEFT, leftButtonISR, FALLING);
+  attachInterrupt(PB_RIGHT, rightButtonISR, FALLING);
+  }
 
 // ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
-// Funciones Adicionales
+// Funciones de interrupción
 
-void setupServo() {
-  myServo.attach(Servo_Pin); // Configura el pin del servo y los límites de pulso
-  myServo.setPeriodHertz(50); // Configura la frecuencia del servo a 50 Hz
-}
-
-void setupButtons() {
-  pinMode(PB_Left, INPUT); // Configura el botón izquierdo con resistencia pull-up
-  pinMode(PB_Right, INPUT); // Configura el botón derecho con resistencia pull-up
-  attachInterrupt(PB_Left, leftButtonISR, FALLING); // Interrupción para el botón izquierdo
-  attachInterrupt(PB_Right, rightButtonISR, FALLING); // Interrupción para el botón derecho
-}
-
-void IRAM_ATTR leftButtonISR() {
+// Función de interrupción para el botón de color. Esta función se activa cuando se presiona el botón de color, y verifica si ha pasado un tiempo suficiente desde la última pulsación para evitar rebotes.
+void IRAM_ATTR colorButtonISR(void) {
   uint32_t currentTime = millis();
-  if (currentTime - lastLeftButtonPress > 200) { // Evita rebotes
+  if (currentTime - lastColorButtonPress > delayTime) {
+    colorButtonPressed = true;
+    lastColorButtonPress = currentTime;
+    }
+  }
+
+
+// Función de interrupción para el botón de brillo. Esta función se activa cuando se presiona el botón de brillo, y verifica si ha pasado un tiempo suficiente desde la última pulsación para evitar rebotes.
+void IRAM_ATTR brightnessButtonISR(void) {
+  uint32_t currentTime = millis();
+  if (currentTime - lastBrightnessButtonPress > delayTime) {
+    brightnessButtonPressed = true;
+    lastBrightnessButtonPress = currentTime;
+    }
+  }
+
+// Función de interrupción para el botón izquierdo. Esta función se activa cuando se presiona el botón izquierdo, y verifica si ha pasado un tiempo suficiente desde la última pulsación para evitar rebotes.
+void IRAM_ATTR leftButtonISR(void) {
+  uint32_t currentTime = millis();
+  if (currentTime - lastLeftButtonPress > delayTime) {
     leftButtonPressed = true;
     lastLeftButtonPress = currentTime;
+    }
   }
-}
 
-void IRAM_ATTR rightButtonISR() {
+// Función de interrupción para el botón derecho. Esta función se activa cuando se presiona el botón derecho, y verifica si ha pasado un tiempo suficiente desde la última pulsación para evitar rebotes.
+void IRAM_ATTR rightButtonISR(void) {
   uint32_t currentTime = millis();
-  if (currentTime - lastRightButtonPress > 200) { // Evita rebotes
+  if (currentTime - lastRightButtonPress > delayTime) {
     rightButtonPressed = true;
     lastRightButtonPress = currentTime;
+    }
   }
-}
 
-void updateServo() {
-  myServo.writeMicroseconds(servoPositions[servoPosition]);
-  Serial.print("Servo movido a la posición: ");
-  Serial.println(servoPosition);
-}
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Funciones de actualización
+
+// Esta función actualiza los LEDs basados en el brillo seleccionado para cada color. Utiliza un arreglo de niveles de brillo predefinidos y escribe el valor correspondiente en los canales PWM.
+void updateLEDs(void) {
+  const int brightnessLevels[] = {0, 16384, 32768, 49152, 65535}; // Niveles de brillo predefinidos para los LEDs. Estos niveles corresponden a 0%, 25%, 50%, 75% y 100% de brillo.
+  ledcWrite(PWM_Channel_Red, brightnessLevels[brightnessred]);
+  ledcWrite(PWM_Channel_Green, brightnessLevels[brightnessgreen]);
+  ledcWrite(PWM_Channel_Blue, brightnessLevels[brightnessblue]);
+  }
+
+void updateServoPosition(void) { // Esta función actualiza la posición del servo basado en el índice de la posición actual. Utiliza un arreglo de posiciones predefinidas y escribe el valor correspondiente en el canal PWM del servo.
+  ledcWrite(PWM_Channel_Servo, map(servoPositions[servoPosition], 0, 2500, 0, 65535));
+  }
+
+
+// Esta función actualiza los LEDs basados en la posición del servo. Lo hace de manera que si el servo está en la posición 0 o 4, los LEDs se apagan. En las posiciones 1, 2 y 3, se enciende un LED específico (rojo, verde o azul respectivamente) con un brillo máximo.
+void updateLEDsBasedOnServo(void) {
+  const int brightnessLevels[] = {0, 16384, 32768, 49152, 65535};
+  if (servoPosition == 0 || servoPosition == 4) {
+    ledcWrite(PWM_Channel_Red, 0);
+    ledcWrite(PWM_Channel_Green, 0);
+    ledcWrite(PWM_Channel_Blue, 0);
+    return;
+  }
+
+  switch (servoPosition) {
+    case 1: // Rojo
+      ledcWrite(PWM_Channel_Red, brightnessLevels[4]);
+      ledcWrite(PWM_Channel_Green, 0);
+      ledcWrite(PWM_Channel_Blue, 0);
+      break;
+    case 2: // Verde
+      ledcWrite(PWM_Channel_Red, 0);
+      ledcWrite(PWM_Channel_Green, brightnessLevels[4]);
+      ledcWrite(PWM_Channel_Blue, 0);
+      break;
+    case 3: // Azul
+      ledcWrite(PWM_Channel_Red, 0);
+      ledcWrite(PWM_Channel_Green, 0);
+      ledcWrite(PWM_Channel_Blue, brightnessLevels[4]);
+      break;
+    }
+  }
