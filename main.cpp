@@ -1,0 +1,111 @@
+// Sophia Franke | 23030
+// Lab 4: Señales PWM Parte B
+// Fecha: 2025-08-15
+#include <Arduino.h>
+#include <stdint.h>
+#include <ESP32Servo.h>
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Definición de pines
+#define Servo_Pin 26
+#define PB_Left 25
+#define PB_Right 33
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Variables Globales
+Servo myServo;
+volatile bool leftButtonPressed = false;
+volatile bool rightButtonPressed = false;
+volatile int32_t lastLeftButtonPress = 0;
+volatile int32_t lastRightButtonPress = 0;
+volatile int32_t servoPosition = 2; // Posición inicial del servo en milisegundos (90 grados)
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Tiempo de pulsos para el servo
+const int servoPositions[5] = {500, 1000, 1500, 2000, 2500}; // Posiciones del servo en microsegundos
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Prototipos de funciones
+void setupServo(void);
+void setupButtons(void);
+void IRAM_ATTR leftButtonISR(void);
+void IRAM_ATTR rightButtonISR(void);
+void updateServo(void);
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Setup Principal
+void setup() {
+  Serial.begin(115200);
+  setupServo();
+  setupButtons();
+  myServo.writeMicroseconds(servoPositions[servoPosition]); // Inicializa el servo en la posición inicial
+  Serial.print("Posición inicial del servo: ");
+  Serial.println(servoPosition);
+}
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Loop Principal
+void loop() {
+  if (leftButtonPressed) {
+    leftButtonPressed = false;
+    if (servoPosition > 0) {
+      servoPosition--;
+      Serial.print("Posición del servo (Izq.): ");
+      Serial.println(servoPosition);
+    } else {
+      Serial.println("El servo ya está en la posición mínima.");
+    }
+    updateServo();
+    delay(250); // Para evitar rebotes
+  }
+
+  if (rightButtonPressed) {
+    rightButtonPressed = false;
+    if (servoPosition < 4) {
+      servoPosition++;
+      Serial.print("Posición del servo (Der.): ");
+      Serial.println(servoPosition);
+    } else {
+      Serial.println("El servo ya está en la posición máxima.");
+    }
+    updateServo();
+    delay(250); // Para evitar rebotes
+  }
+}
+
+// ➽──────❥ ❀⊱༺♡༻⊰❀ ➽──────❥
+// Funciones Adicionales
+
+void setupServo() {
+  myServo.attach(Servo_Pin); // Configura el pin del servo y los límites de pulso
+  myServo.setPeriodHertz(50); // Configura la frecuencia del servo a 50 Hz
+}
+
+void setupButtons() {
+  pinMode(PB_Left, INPUT); // Configura el botón izquierdo con resistencia pull-up
+  pinMode(PB_Right, INPUT); // Configura el botón derecho con resistencia pull-up
+  attachInterrupt(PB_Left, leftButtonISR, FALLING); // Interrupción para el botón izquierdo
+  attachInterrupt(PB_Right, rightButtonISR, FALLING); // Interrupción para el botón derecho
+}
+
+void IRAM_ATTR leftButtonISR() {
+  uint32_t currentTime = millis();
+  if (currentTime - lastLeftButtonPress > 200) { // Evita rebotes
+    leftButtonPressed = true;
+    lastLeftButtonPress = currentTime;
+  }
+}
+
+void IRAM_ATTR rightButtonISR() {
+  uint32_t currentTime = millis();
+  if (currentTime - lastRightButtonPress > 200) { // Evita rebotes
+    rightButtonPressed = true;
+    lastRightButtonPress = currentTime;
+  }
+}
+
+void updateServo() {
+  myServo.writeMicroseconds(servoPositions[servoPosition]);
+  Serial.print("Servo movido a la posición: ");
+  Serial.println(servoPosition);
+}
